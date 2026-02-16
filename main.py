@@ -6,7 +6,7 @@ Tests the scheduling logic in the terminal before UI integration.
 from datetime import date
 from src.pawpal_system import (
     Task, Pet, Owner, OwnerPreferences,
-    Priority, TaskCategory,
+    Priority, TaskCategory, TaskFrequency,
     PriorityGreedyScheduler
 )
 
@@ -152,6 +152,79 @@ def main():
         print("✅ Schedule is valid (no conflicts detected)")
     else:
         print("❌ Schedule has conflicts!")
+
+    # ============================================================================
+    # Demo: Algorithmic Features (Phase 4)
+    # ============================================================================
+
+    print("\n" + "=" * 60)
+    print("🧮 Algorithmic Features Demo")
+    print("=" * 60)
+
+    print("\n--- Sorting Tasks ---")
+
+    # Sort by priority
+    print("\n1. Tasks sorted by priority (highest first):")
+    sorted_by_priority = owner.get_tasks_sorted_by_priority()
+    for task in sorted_by_priority[:5]:  # Show top 5
+        print(f"   {task.priority.name:8} - {task.title} ({task.duration_minutes} min)")
+
+    # Sort by time
+    print("\n2. Tasks sorted by duration (shortest first):")
+    sorted_by_time = owner.get_tasks_sorted_by_time()
+    for task in sorted_by_time[:5]:  # Show top 5
+        print(f"   {task.duration_minutes:3} min - {task.title} ({task.priority.name})")
+
+    print("\n--- Filtering Tasks ---")
+
+    # Filter incomplete tasks
+    all_tasks_check = owner.get_all_tasks()
+    incomplete_tasks = owner.get_incomplete_tasks()
+    print(f"\n3. Incomplete tasks: {len(incomplete_tasks)} out of {len(all_tasks_check)}")
+
+    # Filter by category
+    walk_tasks = []
+    for pet in owner.pets:
+        walk_tasks.extend(pet.get_tasks_by_category(TaskCategory.WALK))
+    print(f"4. Walk tasks across all pets: {len(walk_tasks)}")
+    for task in walk_tasks:
+        print(f"   - {task.title}")
+
+    print("\n--- Recurring Tasks ---")
+
+    # Add a recurring daily task
+    recurring_task = Task(
+        title="Evening walk",
+        duration_minutes=20,
+        priority=Priority.HIGH,
+        category=TaskCategory.WALK,
+        description="Daily evening exercise",
+        frequency=TaskFrequency.DAILY
+    )
+    dog.add_task(recurring_task)
+    print(f"\n5. Added recurring task: {recurring_task.title} ({recurring_task.frequency.value})")
+
+    # Mark complete and generate next occurrence
+    print(f"   Before: is_completed = {recurring_task.is_completed}")
+    next_task = recurring_task.mark_complete()
+    print(f"   After marking complete: is_completed = {recurring_task.is_completed}")
+    if next_task:
+        print(f"   ✅ Auto-generated next occurrence: {next_task.title}")
+        print(f"      Frequency: {next_task.frequency.value}")
+        print(f"      Completed: {next_task.is_completed}")
+
+    print("\n--- Conflict Detection ---")
+
+    # Check for conflicts in the schedule
+    conflicts = schedule.detect_conflicts()
+    if conflicts:
+        print(f"\n6. ⚠️  Found {len(conflicts)} conflict(s):")
+        for conf in conflicts:
+            print(f"   - {conf['task1']} ({conf['task1_time']})")
+            print(f"     conflicts with")
+            print(f"     {conf['task2']} ({conf['task2_time']})")
+    else:
+        print("6. ✅ No conflicts detected in the schedule")
 
     print("\n" + "=" * 60)
     print("Demo complete!")

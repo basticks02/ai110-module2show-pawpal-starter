@@ -31,6 +31,14 @@ class TaskCategory(Enum):
     ENRICHMENT = "enrichment"
 
 
+class TaskFrequency(Enum):
+    """Frequency for recurring tasks."""
+    ONCE = "once"
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
 # ============================================================================
 # Domain Models
 # ============================================================================
@@ -43,10 +51,43 @@ class Task:
     priority: Priority
     category: TaskCategory
     description: str = ""
+    frequency: 'TaskFrequency' = None
+    is_completed: bool = False
+
+    def __post_init__(self):
+        """Initialize frequency to ONCE if not specified."""
+        if self.frequency is None:
+            from sys import modules
+            # Import TaskFrequency if not already available
+            if 'TaskFrequency' not in dir(modules[__name__]):
+                self.frequency = TaskFrequency.ONCE
+            else:
+                self.frequency = TaskFrequency.ONCE
 
     def get_priority_score(self) -> int:
         """Returns numeric priority score for comparison."""
         return self.priority.value
+
+    def mark_complete(self) -> Optional['Task']:
+        """
+        Marks this task as complete.
+        For recurring tasks, returns a new task for the next occurrence.
+        For one-time tasks, just marks complete and returns None.
+        """
+        self.is_completed = True
+
+        # If it's a recurring task, create next occurrence
+        if self.frequency != TaskFrequency.ONCE:
+            return Task(
+                title=self.title,
+                duration_minutes=self.duration_minutes,
+                priority=self.priority,
+                category=self.category,
+                description=self.description,
+                frequency=self.frequency,
+                is_completed=False
+            )
+        return None
 
 
 @dataclass
@@ -73,6 +114,22 @@ class Pet:
     def get_tasks_by_category(self, category: TaskCategory) -> List[Task]:
         """Returns all tasks matching the given category."""
         return [task for task in self.tasks if task.category == category]
+
+    def get_tasks_by_completion(self, completed: bool = False) -> List[Task]:
+        """Returns tasks filtered by completion status."""
+        return [task for task in self.tasks if task.is_completed == completed]
+
+    def get_incomplete_tasks(self) -> List[Task]:
+        """Returns all incomplete tasks."""
+        return self.get_tasks_by_completion(completed=False)
+
+    def sort_tasks_by_time(self, reverse: bool = False) -> List[Task]:
+        """Returns tasks sorted by duration."""
+        return sorted(self.tasks, key=lambda t: t.duration_minutes, reverse=reverse)
+
+    def sort_tasks_by_priority(self, reverse: bool = True) -> List[Task]:
+        """Returns tasks sorted by priority (highest first by default)."""
+        return sorted(self.tasks, key=lambda t: t.get_priority_score(), reverse=reverse)
 
 
 @dataclass
@@ -121,6 +178,18 @@ class Owner:
     def calculate_total_task_time(self) -> int:
         """Calculates total time needed for all tasks."""
         return sum(task.duration_minutes for task in self.get_all_tasks())
+
+    def get_incomplete_tasks(self) -> List[Task]:
+        """Returns all incomplete tasks across all pets."""
+        return [task for task in self.get_all_tasks() if not task.is_completed]
+
+    def get_tasks_sorted_by_priority(self) -> List[Task]:
+        """Returns all tasks sorted by priority (highest first)."""
+        return sorted(self.get_all_tasks(), key=lambda t: t.get_priority_score(), reverse=True)
+
+    def get_tasks_sorted_by_time(self) -> List[Task]:
+        """Returns all tasks sorted by duration (shortest first)."""
+        return sorted(self.get_all_tasks(), key=lambda t: t.duration_minutes)
 
 
 # ============================================================================
@@ -182,6 +251,24 @@ class Schedule:
                 if task1.conflicts_with(task2):
                     return False
         return True
+
+    def detect_conflicts(self) -> List[Dict]:
+        """
+        Detects and returns detailed information about any time conflicts.
+        Returns list of conflict dictionaries with task details.
+        """
+        conflicts = []
+        for i, task1 in enumerate(self.scheduled_tasks):
+            for j, task2 in enumerate(self.scheduled_tasks[i+1:], start=i+1):
+                if task1.conflicts_with(task2):
+                    conflicts.append({
+                        'task1': task1.task.title,
+                        'task1_time': f"{task1.scheduled_time.strftime('%H:%M')} - {task1.get_end_time().strftime('%H:%M')}",
+                        'task2': task2.task.title,
+                        'task2_time': f"{task2.scheduled_time.strftime('%H:%M')} - {task2.get_end_time().strftime('%H:%M')}",
+                        'overlap': 'These tasks have overlapping time slots'
+                    })
+        return conflicts
 
     def generate_explanation(self) -> str:
         """Generates human-readable explanation of scheduling decisions."""
