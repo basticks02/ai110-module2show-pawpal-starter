@@ -46,7 +46,7 @@ class Task:
 
     def get_priority_score(self) -> int:
         """Returns numeric priority score for comparison."""
-        pass
+        return self.priority.value
 
 
 @dataclass
@@ -59,19 +59,20 @@ class Pet:
 
     def add_task(self, task: Task) -> None:
         """Adds a task to this pet's care routine."""
-        pass
+        self.tasks.append(task)
 
     def remove_task(self, task: Task) -> None:
         """Removes a task from this pet's care routine."""
-        pass
+        if task in self.tasks:
+            self.tasks.remove(task)
 
     def get_tasks_by_priority(self, priority: Priority) -> List[Task]:
         """Returns all tasks matching the given priority."""
-        pass
+        return [task for task in self.tasks if task.priority == priority]
 
     def get_tasks_by_category(self, category: TaskCategory) -> List[Task]:
         """Returns all tasks matching the given category."""
-        pass
+        return [task for task in self.tasks if task.category == category]
 
 
 @dataclass
@@ -83,7 +84,9 @@ class OwnerPreferences:
 
     def should_group_tasks(self, task1: Task, task2: Task) -> bool:
         """Determines if two tasks should be grouped together."""
-        pass
+        if not self.group_similar_tasks:
+            return False
+        return task1.category == task2.category
 
 
 @dataclass
@@ -101,19 +104,23 @@ class Owner:
 
     def add_pet(self, pet: Pet) -> None:
         """Adds a pet to the owner's care."""
-        pass
+        self.pets.append(pet)
 
     def remove_pet(self, pet: Pet) -> None:
         """Removes a pet from the owner's care."""
-        pass
+        if pet in self.pets:
+            self.pets.remove(pet)
 
     def get_all_tasks(self) -> List[Task]:
         """Returns all tasks across all pets."""
-        pass
+        all_tasks = []
+        for pet in self.pets:
+            all_tasks.extend(pet.tasks)
+        return all_tasks
 
     def calculate_total_task_time(self) -> int:
         """Calculates total time needed for all tasks."""
-        pass
+        return sum(task.duration_minutes for task in self.get_all_tasks())
 
 
 # ============================================================================
@@ -130,11 +137,17 @@ class ScheduledTask:
 
     def get_end_time(self) -> time:
         """Calculates when this task will end."""
-        pass
+        from datetime import datetime, timedelta
+        # Convert time to datetime, add duration, convert back to time
+        dt = datetime.combine(datetime.today(), self.scheduled_time)
+        end_dt = dt + timedelta(minutes=self.task.duration_minutes)
+        return end_dt.time()
 
     def conflicts_with(self, other: 'ScheduledTask') -> bool:
         """Checks if this task conflicts with another scheduled task."""
-        pass
+        # Simple overlap check: if one task starts before the other ends
+        return not (self.get_end_time() <= other.scheduled_time or
+                   other.get_end_time() <= self.scheduled_time)
 
 
 @dataclass
@@ -148,23 +161,71 @@ class Schedule:
 
     def calculate_total_time(self) -> int:
         """Calculates total time of all scheduled tasks."""
-        pass
+        total = sum(st.task.duration_minutes for st in self.scheduled_tasks)
+        self.total_time_minutes = total
+        return total
 
     def calculate_utilization(self, available_time: int) -> float:
         """Calculates percentage of available time used."""
-        pass
+        if available_time == 0:
+            self.utilization_percentage = 0.0
+            return 0.0
+        utilization = (self.total_time_minutes / available_time) * 100
+        self.utilization_percentage = round(utilization, 2)
+        return self.utilization_percentage
 
     def validate(self) -> bool:
         """Validates the schedule for conflicts and constraint violations."""
-        pass
+        # Check for time conflicts between scheduled tasks
+        for i, task1 in enumerate(self.scheduled_tasks):
+            for task2 in self.scheduled_tasks[i+1:]:
+                if task1.conflicts_with(task2):
+                    return False
+        return True
 
     def generate_explanation(self) -> str:
         """Generates human-readable explanation of scheduling decisions."""
-        pass
+        if not self.scheduled_tasks and not self.unscheduled_tasks:
+            return "No tasks to schedule."
+
+        explanation = []
+        explanation.append(f"Scheduled {len(self.scheduled_tasks)} task(s) for {self.date}.")
+        explanation.append(f"Total time: {self.total_time_minutes} minutes ({self.utilization_percentage}% utilization).")
+
+        if self.unscheduled_tasks:
+            explanation.append(f"\n{len(self.unscheduled_tasks)} task(s) could not be scheduled:")
+            for task in self.unscheduled_tasks:
+                explanation.append(f"  - {task.title} ({task.duration_minutes} min, {task.priority.name})")
+
+        return "\n".join(explanation)
 
     def to_dict(self) -> Dict:
         """Converts schedule to dictionary for UI display."""
-        pass
+        return {
+            "date": str(self.date),
+            "scheduled_tasks": [
+                {
+                    "title": st.task.title,
+                    "time": str(st.scheduled_time),
+                    "duration": st.task.duration_minutes,
+                    "priority": st.task.priority.name,
+                    "category": st.task.category.value,
+                    "reasoning": st.reasoning
+                }
+                for st in self.scheduled_tasks
+            ],
+            "unscheduled_tasks": [
+                {
+                    "title": task.title,
+                    "duration": task.duration_minutes,
+                    "priority": task.priority.name,
+                    "category": task.category.value
+                }
+                for task in self.unscheduled_tasks
+            ],
+            "total_time_minutes": self.total_time_minutes,
+            "utilization_percentage": self.utilization_percentage
+        }
 
 
 # ============================================================================
@@ -185,11 +246,12 @@ class Scheduler(ABC):
 
     def _validate_constraints(self, schedule: Schedule) -> bool:
         """Validates schedule against constraints."""
-        pass
+        return schedule.validate()
 
     def _calculate_task_score(self, task: Task, current_time: time) -> float:
         """Calculates a score for task prioritization."""
-        pass
+        # Base implementation: just return priority score
+        return float(task.get_priority_score())
 
 
 class PriorityGreedyScheduler(Scheduler):
@@ -209,16 +271,126 @@ class PriorityGreedyScheduler(Scheduler):
         Generates schedule using priority-based greedy algorithm.
         Higher priority tasks are scheduled first.
         """
-        pass
+        from datetime import datetime, timedelta
+
+        # Get all tasks and sort by priority (highest first)
+        all_tasks = self.owner.get_all_tasks()
+        available_tasks = sorted(all_tasks, key=lambda t: t.get_priority_score(), reverse=True)
+
+        # Initialize schedule
+        schedule = Schedule(date=self.date)
+
+        # Handle edge case: no tasks
+        if not available_tasks:
+            return schedule
+
+        # Handle edge case: no time available
+        if self.owner.available_time_minutes <= 0:
+            schedule.unscheduled_tasks = available_tasks.copy()
+            schedule.calculate_total_time()
+            schedule.calculate_utilization(self.owner.available_time_minutes)
+            return schedule
+
+        # Start scheduling from 6:00 AM
+        current_time = time(6, 0)
+        remaining_time = self.owner.available_time_minutes
+        order_index = 0
+
+        # Greedy algorithm: schedule highest priority tasks that fit
+        while remaining_time > 0 and available_tasks:
+            # Find the next task that fits
+            next_task = self._select_next_task(available_tasks, current_time)
+
+            if next_task is None:
+                # No more tasks can fit
+                break
+
+            # Check if task fits in remaining time
+            if not self._can_fit_task(next_task, current_time, remaining_time):
+                # Task doesn't fit, remove from available and try next
+                available_tasks.remove(next_task)
+                schedule.unscheduled_tasks.append(next_task)
+                continue
+
+            # Schedule the task
+            score = self._calculate_task_score(next_task, current_time)
+            reasoning = self._generate_reasoning(next_task, score, available_tasks[:3])
+
+            scheduled_task = ScheduledTask(
+                task=next_task,
+                scheduled_time=current_time,
+                order_index=order_index,
+                reasoning=reasoning
+            )
+
+            schedule.scheduled_tasks.append(scheduled_task)
+
+            # Update state
+            available_tasks.remove(next_task)
+            remaining_time -= next_task.duration_minutes
+            order_index += 1
+
+            # Move current time forward
+            dt = datetime.combine(datetime.today(), current_time)
+            dt += timedelta(minutes=next_task.duration_minutes)
+            current_time = dt.time()
+
+        # Any remaining tasks are unscheduled
+        schedule.unscheduled_tasks.extend(available_tasks)
+
+        # Finalize schedule
+        schedule.calculate_total_time()
+        schedule.calculate_utilization(self.owner.available_time_minutes)
+
+        return schedule
 
     def _select_next_task(self, available_tasks: List[Task], current_time: time) -> Optional[Task]:
         """Selects the next task to schedule based on priority and scoring."""
-        pass
+        if not available_tasks:
+            return None
+
+        # Find highest scoring task
+        best_task = None
+        best_score = -1
+
+        for task in available_tasks:
+            score = self._calculate_task_score(task, current_time)
+            if score > best_score:
+                best_score = score
+                best_task = task
+
+        return best_task
 
     def _can_fit_task(self, task: Task, current_time: time, remaining_time: int) -> bool:
         """Checks if a task can fit in remaining time."""
-        pass
+        return task.duration_minutes <= remaining_time
 
     def _generate_reasoning(self, task: Task, score: float, alternatives: List[Task]) -> str:
         """Generates explanation for why this task was chosen."""
-        pass
+        reasons = []
+
+        # Priority-based reasoning
+        if task.priority == Priority.CRITICAL:
+            reasons.append("CRITICAL priority - must be completed")
+        elif task.priority == Priority.HIGH:
+            reasons.append("HIGH priority task")
+        elif task.priority == Priority.MEDIUM:
+            reasons.append("MEDIUM priority task")
+        else:
+            reasons.append("LOW priority task")
+
+        # Category-based reasoning
+        if task.category == TaskCategory.MEDICATION:
+            reasons.append("medication should not be delayed")
+        elif task.category == TaskCategory.FEEDING:
+            reasons.append("feeding is essential care")
+        elif task.category == TaskCategory.WALK:
+            reasons.append("exercise is important for pet health")
+
+        # Mention alternatives if any
+        if len(alternatives) > 1:
+            other_priorities = [t.priority.name for t in alternatives[1:3]]
+            if other_priorities:
+                reasons.append(f"chosen over {', '.join(other_priorities)} priority tasks")
+
+        return ". ".join(reasons) + "."
